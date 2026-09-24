@@ -1,13 +1,13 @@
-/* あさひヶ丘プロジェクト（架空）共有3Dシーン
+/* あさひヶ丘プロジェクト（架空）共有3Dシーン ── 透明感×メッシュ構造版
    THREE r128 UMD + OrbitControls を読み込んだ後に使用する。
    API:
-     const app = SiteScene({canvas, interactive, autoRotate});
+     const app = SiteScene({canvas, interactive, autoRotate, markers});
      app.setTime(t)        // 0..26 (月インデックス, 小数可)
      app.getTime()
      app.flyTo(id|pose, ms)
      app.setPose(pose)     // {px,py,pz,tx,ty,tz} 即時適用（スクロール駆動用）
      app.onMarkerClick(cb) // cb(camId)
-     app.resize()
+     app.renderOnce()      // ループ外で1フレーム描画（録画用）
    SiteData: MONTH_LABELS / WORKERS / FOOTAGE / MILESTONES / CAMS / phaseAt(t)
 */
 (function () {
@@ -65,7 +65,7 @@
   };
 
   // ---------- ユーティリティ ----------
-  function rng(seed) { // 決定的乱数
+  function rng(seed) {
     var s = seed >>> 0;
     return function () {
       s = (s * 1664525 + 1013904223) >>> 0;
@@ -78,11 +78,12 @@
   window.SiteScene = function (opts) {
     var canvas = opts.canvas;
     var interactive = opts.interactive !== false;
-    var renderer = new THREE.WebGLRenderer({ canvas: canvas, antialias: true });
+    var renderer = new THREE.WebGLRenderer({ canvas: canvas, antialias: true, alpha: true, preserveDrawingBuffer: !!opts.record });
     renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+    if (opts.record) renderer.setClearColor(0xdfecf7, 1); // 録画時は空色ソリッド
+    else renderer.setClearColor(0x000000, 0);             // 通常はページ側のグラデーション
     var scene = new THREE.Scene();
-    scene.background = new THREE.Color(0x0e1118);
-    scene.fog = new THREE.Fog(0x0e1118, 190, 420);
+    scene.fog = new THREE.Fog(0xeaf2f8, 220, 520);
 
     var camera = new THREE.PerspectiveCamera(46, 2, 1, 900);
     camera.position.set(-140, 95, 150);
@@ -101,23 +102,29 @@
     }
     var lookTarget = new THREE.Vector3(0, 4, 0);
 
-    // ライティング
-    scene.add(new THREE.HemisphereLight(0x93a7c8, 0x2b2015, 0.85));
-    var sun = new THREE.DirectionalLight(0xffdcb0, 1.15);
-    sun.position.set(90, 120, 40);
+    // ライティング（明るく、影は淡く）
+    scene.add(new THREE.HemisphereLight(0xffffff, 0xcfe0d8, 0.8));
+    var sun = new THREE.DirectionalLight(0xfff4e0, 0.75);
+    sun.position.set(90, 130, 50);
     scene.add(sun);
-    var rim = new THREE.DirectionalLight(0x4a78d6, 0.35);
+    var rim = new THREE.DirectionalLight(0xbcd8f5, 0.35);
     rim.position.set(-80, 60, -90);
     scene.add(rim);
 
-    // ---------- 地形 ----------
+    // ---------- 地形（淡色 + ワイヤーグリッド） ----------
     var W = 340, D = 220, SX = 90, SZ = 60;
     var ground = new THREE.PlaneGeometry(W, D, SX, SZ);
     ground.rotateX(-Math.PI / 2);
     var pos = ground.attributes.position;
     var colors = new Float32Array(pos.count * 3);
     var rnd = rng(20260924);
-    function inSite(x, z) { // 造成エリア（有機的な形）
+    function terrainH(x, z) {
+      var h = (Math.sin(x * 0.022) + Math.cos(z * 0.035 + 1.7)) * 2.2 +
+              Math.sin(x * 0.008 + z * 0.011) * 3.4;
+      var edge = Math.max(Math.abs(x) / (W / 2), Math.abs(z) / (D / 2));
+      return h + ease((edge - 0.55) / 0.45) * 7;
+    }
+    function inSite(x, z) {
       var dx = x / 120, dz = z / 62;
       var r = dx * dx + dz * dz;
       var wob = 0.16 * Math.sin(x * 0.045 + 1.2) + 0.13 * Math.cos(z * 0.07 + 0.5);
@@ -125,18 +132,15 @@
     }
     for (var i = 0; i < pos.count; i++) {
       var x = pos.getX(i), z = pos.getZ(i);
-      var h = (Math.sin(x * 0.022) + Math.cos(z * 0.035 + 1.7)) * 2.2 +
-              Math.sin(x * 0.008 + z * 0.011) * 3.4;
-      var edge = Math.max(Math.abs(x) / (W / 2), Math.abs(z) / (D / 2));
-      h += ease((edge - 0.55) / 0.45) * 7; // 外周は山なみ
+      var h = terrainH(x, z);
       var c;
       if (inSite(x, z)) {
-        h *= 0.06; // 造成で平ら
-        var t0 = 0.85 + rnd() * 0.25;
-        c = [0.30 * t0, 0.24 * t0, 0.165 * t0]; // 土
+        h *= 0.06;
+        var t0 = 0.95 + rnd() * 0.08;
+        c = [0.88 * t0, 0.80 * t0, 0.64 * t0];   // 砂色（造成地）
       } else {
-        var g = 0.8 + rnd() * 0.4;
-        c = [0.075 * g, 0.135 * g, 0.07 * g]; // 山林
+        var g = 0.94 + rnd() * 0.1;
+        c = [0.58 * g, 0.76 * g, 0.60 * g];      // 淡いグリーン（山林）
       }
       pos.setY(i, h);
       colors[i * 3] = c[0]; colors[i * 3 + 1] = c[1]; colors[i * 3 + 2] = c[2];
@@ -145,48 +149,63 @@
     ground.computeVertexNormals();
     scene.add(new THREE.Mesh(ground, new THREE.MeshLambertMaterial({ vertexColors: true })));
 
-    // 場内道路
-    var roadMat = new THREE.MeshLambertMaterial({ color: 0x23211d });
-    [[-52, 8, 46, 4, 0], [0, -2, 4, 70, 0], [22, 8, 60, 4, 0], [-20, -22, 70, 4, 0]]
+    // 地形ワイヤーグリッド（測量図の趣）
+    var groundWire = new THREE.Mesh(ground.clone(), new THREE.MeshBasicMaterial({
+      color: 0x7ba7d4, wireframe: true, transparent: true, opacity: 0.14, depthWrite: false
+    }));
+    groundWire.position.y = 0.18;
+    scene.add(groundWire);
+
+    // 場内道路（淡グレー）
+    var roadMat = new THREE.MeshLambertMaterial({ color: 0xcfd6dc, transparent: true, opacity: 0.9 });
+    [[-52, 8, 46, 4], [0, -2, 4, 70], [22, 8, 60, 4], [-20, -22, 70, 4]]
       .forEach(function (r) {
         var m = new THREE.Mesh(new THREE.BoxGeometry(r[2], 0.3, r[3]), roadMat);
         m.position.set(r[0], 0.28, r[1]);
         scene.add(m);
       });
 
-    // 樹木（外周）
+    // 樹木（外周・淡色）
     var treeGeo = new THREE.ConeGeometry(1.6, 4.2, 6);
-    var treeMat = new THREE.MeshLambertMaterial({ color: 0x1c3320 });
+    var treeMat = new THREE.MeshLambertMaterial({ color: 0x8fbf9a, transparent: true, opacity: 0.85 });
     var tr = rng(7);
     for (var ti = 0; ti < 260; ti++) {
       var tx = (tr() - 0.5) * (W - 30), tz = (tr() - 0.5) * (D - 30);
       if (inSite(tx, tz)) continue;
       var tree = new THREE.Mesh(treeGeo, treeMat);
-      var hh = (Math.sin(tx * 0.022) + Math.cos(tz * 0.035 + 1.7)) * 2.2 +
-               Math.sin(tx * 0.008 + tz * 0.011) * 3.4;
-      var ee = Math.max(Math.abs(tx) / (W / 2), Math.abs(tz) / (D / 2));
-      hh += ease((ee - 0.55) / 0.45) * 7;
-      tree.position.set(tx, hh + 1.8, tz);
+      tree.position.set(tx, terrainH(tx, tz) + 1.8, tz);
       var sc = 0.7 + tr() * 0.9; tree.scale.set(sc, sc, sc);
       scene.add(tree);
     }
 
-    // ---------- 建物 ----------
-    var buildings = []; // {mesh, h, m0, m1, (removeAt)}
-    function addB(x, z, w, h, d, color, m0, m1, removeAt) {
-      var mesh = new THREE.Mesh(
-        new THREE.BoxGeometry(w, 1, d),
-        new THREE.MeshLambertMaterial({ color: color })
+    // ---------- 建物: 半透明ガラス + エッジライン ----------
+    var buildings = [];
+    function glassBox(w, h, d, edgeColor, fillOpacity) {
+      var g = new THREE.Group();
+      var geo = new THREE.BoxGeometry(w, 1, d);
+      var fill = new THREE.Mesh(geo, new THREE.MeshLambertMaterial({
+        color: edgeColor, transparent: true, opacity: fillOpacity || 0.14, depthWrite: false
+      }));
+      var edges = new THREE.LineSegments(
+        new THREE.EdgesGeometry(geo),
+        new THREE.LineBasicMaterial({ color: edgeColor, transparent: true, opacity: 0.9 })
       );
-      mesh.position.set(x, 0, z);
-      mesh.visible = false;
-      scene.add(mesh);
-      buildings.push({ mesh: mesh, h: h, m0: m0, m1: m1, removeAt: removeAt });
+      g.add(fill); g.add(edges);
+      g.userData.baseH = 1;
+      return g;
     }
+    function addB(x, z, w, h, d, edgeColor, m0, m1, removeAt, fillOpacity) {
+      var g = glassBox(w, h, d, edgeColor, fillOpacity);
+      g.position.set(x, 0, z);
+      g.visible = false;
+      scene.add(g);
+      buildings.push({ mesh: g, h: h, m0: m0, m1: m1, removeAt: removeAt, scaleY: true });
+    }
+
+    var C_TOWN = 0x1baf7a, C_PLANT = 0xeb6834, C_FACT = 0x2a78d6, C_UTIL = 0x6a7c92;
 
     // 街（西）: プレハブ群 2026-10〜12
     var br = rng(42);
-    var townCols = [0xb9b2a4, 0x9aa4ad, 0xa8988a, 0x8f9aa8, 0xbfb6a0];
     for (var gx = 0; gx < 9; gx++) {
       for (var gz = 0; gz < 6; gz++) {
         var bx = -84 + gx * 7 + (br() - 0.5) * 2;
@@ -194,54 +213,83 @@
         if (!inSite(bx, bz)) continue;
         if (br() < 0.12) continue;
         var m0 = br() * 1.6;
-        addB(bx, bz, 4.6, 2.4 + br() * 1.4, 3.4,
-          townCols[Math.floor(br() * townCols.length)], m0, m0 + 0.9);
+        addB(bx, bz, 4.6, 2.4 + br() * 1.4, 3.4, C_TOWN, m0, m0 + 0.9);
       }
     }
-    // 街の共用棟
-    addB(-58, 24, 12, 4.2, 8, 0xcac2b0, 1.2, 2.2);
-    addB(-74, 24, 8, 3.4, 8, 0xb0b6bd, 1.4, 2.4);
+    addB(-58, 24, 12, 4.2, 8, C_TOWN, 1.2, 2.2, undefined, 0.2);
+    addB(-74, 24, 8, 3.4, 8, C_TOWN, 1.4, 2.4, undefined, 0.2);
 
-    // 生コンプラント（中央南）2027-01〜
-    addB(-8, -26, 9, 6, 7, 0x8a8d92, 2.2, 3.6);
-    addB(2, -30, 7, 4, 6, 0x7d8087, 2.5, 3.8);
-    (function () { // サイロ
-      var siloMat = new THREE.MeshLambertMaterial({ color: 0xb8bcc2 });
+    // 生コンプラント（中央南）
+    addB(-8, -26, 9, 6, 7, C_PLANT, 2.2, 3.6);
+    addB(2, -30, 7, 4, 6, C_PLANT, 2.5, 3.8);
+    (function () {
       for (var s = 0; s < 3; s++) {
-        var silo = new THREE.Mesh(new THREE.CylinderGeometry(1.9, 1.9, 1, 14), siloMat);
-        silo.position.set(-16 + s * 4.6, 0, -30);
-        silo.visible = false;
-        scene.add(silo);
-        buildings.push({ mesh: silo, h: 9, m0: 2.4 + s * 0.3, m1: 3.6 + s * 0.3 });
+        var geo = new THREE.CylinderGeometry(1.9, 1.9, 1, 12);
+        var g = new THREE.Group();
+        g.add(new THREE.Mesh(geo, new THREE.MeshLambertMaterial({ color: C_PLANT, transparent: true, opacity: 0.14, depthWrite: false })));
+        g.add(new THREE.LineSegments(new THREE.EdgesGeometry(geo),
+          new THREE.LineBasicMaterial({ color: C_PLANT, transparent: true, opacity: 0.9 })));
+        g.position.set(-16 + s * 4.6, 0, -30);
+        g.visible = false;
+        scene.add(g);
+        buildings.push({ mesh: g, h: 9, m0: 2.4 + s * 0.3, m1: 3.6 + s * 0.3, scaleY: true });
       }
     })();
 
-    // 工場（東）2027-02〜2028
-    addB(40, 6, 46, 15, 26, 0xd8dde4, 4, 20);      // メイン棟
-    addB(40, -14, 30, 8, 9, 0xc2c9d2, 8, 22);      // 付属棟
-    addB(16, 20, 12, 6.5, 10, 0xaab4c0, 6, 10);    // 管理棟
-    addB(66, 18, 10, 10, 10, 0x9aa5b2, 12, 21);    // ユーティリティ棟
+    // 工場（東）
+    addB(40, 6, 46, 15, 26, C_FACT, 4, 20, undefined, 0.12);
+    addB(40, -14, 30, 8, 9, C_FACT, 8, 22, undefined, 0.12);
+    addB(16, 20, 12, 6.5, 10, C_UTIL, 6, 10);
+    addB(66, 18, 10, 10, 10, C_UTIL, 12, 21);
 
-    // タワークレーン（工事期間のみ）
-    function addCrane(x, z, m0, m1) {
+    // 工場メイン棟の内部フレーム（メッシュの繊細さ: 柱グリッド）
+    (function () {
+      var mat = new THREE.LineBasicMaterial({ color: C_FACT, transparent: true, opacity: 0.35 });
+      var pts = [];
+      for (var fx = -20; fx <= 20; fx += 5) {
+        for (var fz = -11; fz <= 11; fz += 5.5) {
+          pts.push(new THREE.Vector3(fx, -0.5, fz), new THREE.Vector3(fx, 0.5, fz));
+        }
+      }
+      var geo = new THREE.BufferGeometry().setFromPoints(pts);
+      var lines = new THREE.LineSegments(geo, mat);
       var g = new THREE.Group();
-      var mat = new THREE.MeshLambertMaterial({ color: 0xd9a11c });
-      var mast = new THREE.Mesh(new THREE.BoxGeometry(1.1, 26, 1.1), mat);
-      mast.position.y = 13;
-      var jib = new THREE.Mesh(new THREE.BoxGeometry(20, 0.8, 0.8), mat);
-      jib.position.set(6, 26, 0);
-      var cw = new THREE.Mesh(new THREE.BoxGeometry(4, 1.6, 1.4), mat);
-      cw.position.set(-5, 25.4, 0);
-      g.add(mast); g.add(jib); g.add(cw);
+      g.add(lines);
+      g.position.set(40, 0, 6);
+      g.visible = false;
+      scene.add(g);
+      buildings.push({ mesh: g, h: 15, m0: 4, m1: 12, scaleY: true });
+    })();
+
+    // タワークレーン（細身・工事期間のみ）
+    function addCrane(x, z, m0, m1, rot) {
+      var g = new THREE.Group();
+      var mat = new THREE.LineBasicMaterial({ color: 0xe8930c, transparent: true, opacity: 0.95 });
+      var pts = [];
+      // マスト（ラティス風に2本+ジグザグ）
+      pts.push(new THREE.Vector3(-0.5, 0, 0), new THREE.Vector3(-0.5, 26, 0));
+      pts.push(new THREE.Vector3(0.5, 0, 0), new THREE.Vector3(0.5, 26, 0));
+      for (var y = 0; y < 26; y += 2) {
+        pts.push(new THREE.Vector3(-0.5, y, 0), new THREE.Vector3(0.5, y + 2, 0));
+      }
+      // ジブ
+      pts.push(new THREE.Vector3(-6, 26, 0), new THREE.Vector3(16, 26, 0));
+      pts.push(new THREE.Vector3(0, 29, 0), new THREE.Vector3(16, 26, 0));
+      pts.push(new THREE.Vector3(0, 29, 0), new THREE.Vector3(-6, 26, 0));
+      pts.push(new THREE.Vector3(0, 26, 0), new THREE.Vector3(0, 29, 0));
+      // フック
+      pts.push(new THREE.Vector3(12, 26, 0), new THREE.Vector3(12, 18, 0));
+      var geo = new THREE.BufferGeometry().setFromPoints(pts);
+      g.add(new THREE.LineSegments(geo, mat));
       g.position.set(x, 0, z);
-      g.rotation.y = Math.random() * Math.PI * 2;
+      g.rotation.y = rot;
       g.visible = false;
       scene.add(g);
       buildings.push({ mesh: g, h: 1, m0: m0, m1: m0 + 0.5, removeAt: m1, crane: true });
     }
-    addCrane(20, 2, 3.5, 20.5);
-    addCrane(58, 14, 4.2, 19.5);
-    addCrane(44, -8, 7.5, 21.5);
+    addCrane(20, 2, 3.5, 20.5, 0.8);
+    addCrane(58, 14, 4.2, 19.5, 2.4);
+    addCrane(44, -8, 7.5, 21.5, 4.2);
 
     // ---------- 定点カメラマーカー ----------
     var markerGroup = new THREE.Group();
@@ -250,11 +298,11 @@
       var cv = document.createElement("canvas");
       cv.width = 256; cv.height = 96;
       var ctx = cv.getContext("2d");
-      ctx.fillStyle = "rgba(10,14,22,0.82)";
-      ctx.strokeStyle = "#3987e5"; ctx.lineWidth = 4;
+      ctx.fillStyle = "rgba(255,255,255,0.92)";
+      ctx.strokeStyle = "#2a78d6"; ctx.lineWidth = 4;
       (ctx.roundRect ? ctx.roundRect.bind(ctx) : function (x, y, w, h) { ctx.rect(x, y, w, h); })(6, 10, 244, 76, 10);
       ctx.fill(); ctx.stroke();
-      ctx.fillStyle = "#dfe8f6";
+      ctx.fillStyle = "#1c5cab";
       ctx.font = "bold 40px -apple-system, sans-serif";
       ctx.textAlign = "center"; ctx.textBaseline = "middle";
       ctx.fillText(text, 128, 50);
@@ -270,7 +318,7 @@
           var g = new THREE.Group();
           var pole = new THREE.Mesh(
             new THREE.CylinderGeometry(0.25, 0.25, 9, 8),
-            new THREE.MeshLambertMaterial({ color: 0x3987e5 })
+            new THREE.MeshLambertMaterial({ color: 0x2a78d6 })
           );
           pole.position.y = 4.5;
           var label = makeLabel("CAM " + mk.id);
@@ -298,14 +346,16 @@
         } else {
           var hh = Math.max(0.001, b.h * k);
           b.mesh.scale.y = hh;
-          b.mesh.position.y = hh / 2;
+          b.mesh.position.y = 0;
+          // Group内のBoxは高さ1で原点中心 → 底を接地させる
+          b.mesh.children.forEach(function (ch) { ch.position.y = 0.5; });
         }
       }
     }
     setTime(0);
 
     // ---------- カメラ移動 ----------
-    var fly = null; // {p0,p1,t0,t1,start,dur}
+    var fly = null;
     function poseOf(x) {
       if (typeof x === "string") {
         for (var i = 0; i < CAMS.length; i++) if (CAMS[i].id === x) x = CAMS[i];
@@ -360,22 +410,28 @@
         camera.updateProjectionMatrix();
       }
     }
-    var running = true;
-    function loop(now) {
-      if (!running) return;
-      requestAnimationFrame(loop);
+    function renderOnce() {
       resize();
-      if (fly) {
-        var k = ease((now - fly.start) / fly.dur);
-        camera.position.lerpVectors(fly.p0, fly.p1, k);
-        (controls ? controls.target : lookTarget).lerpVectors(fly.t0, fly.t1, k);
-        if (k >= 1) fly = null;
-      }
-      if (controls) controls.update();
-      else camera.lookAt(lookTarget);
+      if (!controls) camera.lookAt(lookTarget);
       renderer.render(scene, camera);
     }
-    requestAnimationFrame(loop);
+    var running = true;
+    if (!opts.record) {
+      (function loop(now) {
+        if (!running) return;
+        requestAnimationFrame(loop);
+        resize();
+        if (fly) {
+          var k = ease((now - fly.start) / fly.dur);
+          camera.position.lerpVectors(fly.p0, fly.p1, k);
+          (controls ? controls.target : lookTarget).lerpVectors(fly.t0, fly.t1, k);
+          if (k >= 1) fly = null;
+        }
+        if (controls) controls.update();
+        else camera.lookAt(lookTarget);
+        renderer.render(scene, camera);
+      })(performance.now());
+    }
 
     return {
       setTime: setTime,
@@ -385,9 +441,10 @@
       onMarkerClick: function (cb) { clickCb = cb; },
       setAutoRotate: function (v) { if (controls) controls.autoRotate = v; },
       setMarkersVisible: function (v) { markerGroup.visible = v; },
+      renderOnce: renderOnce,
       resize: resize,
       dispose: function () { running = false; renderer.dispose(); },
-      camera: camera, controls: controls
+      camera: camera, controls: controls, canvas: canvas
     };
   };
 })();
