@@ -80,10 +80,10 @@
     var interactive = opts.interactive !== false;
     var renderer = new THREE.WebGLRenderer({ canvas: canvas, antialias: true, alpha: true, preserveDrawingBuffer: !!opts.record });
     renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
-    if (opts.record) renderer.setClearColor(0xdfecf7, 1); // 録画時は空色ソリッド
+    if (opts.record) renderer.setClearColor(0xf3f3f2, 1); // 録画時は空色ソリッド
     else renderer.setClearColor(0x000000, 0);             // 通常はページ側のグラデーション
     var scene = new THREE.Scene();
-    scene.fog = new THREE.Fog(0xeaf2f8, 220, 520);
+    scene.fog = new THREE.Fog(0xf3f3f2, 220, 520);
 
     var camera = new THREE.PerspectiveCamera(46, 2, 1, 900);
     camera.position.set(-140, 95, 150);
@@ -299,10 +299,10 @@
       cv.width = 256; cv.height = 96;
       var ctx = cv.getContext("2d");
       ctx.fillStyle = "rgba(255,255,255,0.92)";
-      ctx.strokeStyle = "#2a78d6"; ctx.lineWidth = 4;
+      ctx.strokeStyle = "#1a1a1a"; ctx.lineWidth = 4;
       ctx.rect(6, 10, 244, 76);
       ctx.fill(); ctx.stroke();
-      ctx.fillStyle = "#1c5cab";
+      ctx.fillStyle = "#1a1a1a";
       ctx.font = "bold 40px -apple-system, sans-serif";
       ctx.textAlign = "center"; ctx.textBaseline = "middle";
       ctx.fillText(text, 128, 50);
@@ -318,7 +318,7 @@
           var g = new THREE.Group();
           var pole = new THREE.Mesh(
             new THREE.CylinderGeometry(0.25, 0.25, 9, 8),
-            new THREE.MeshLambertMaterial({ color: 0x2a78d6 })
+            new THREE.MeshLambertMaterial({ color: 0x1a1a1a })
           );
           pole.position.y = 4.5;
           var label = makeLabel("CAM " + mk.id);
