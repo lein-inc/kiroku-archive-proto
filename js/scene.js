@@ -300,7 +300,7 @@
       var ctx = cv.getContext("2d");
       ctx.fillStyle = "rgba(255,255,255,0.92)";
       ctx.strokeStyle = "#2a78d6"; ctx.lineWidth = 4;
-      (ctx.roundRect ? ctx.roundRect.bind(ctx) : function (x, y, w, h) { ctx.rect(x, y, w, h); })(6, 10, 244, 76, 10);
+      ctx.rect(6, 10, 244, 76);
       ctx.fill(); ctx.stroke();
       ctx.fillStyle = "#1c5cab";
       ctx.font = "bold 40px -apple-system, sans-serif";
